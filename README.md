@@ -234,3 +234,19 @@ async/await support in macroquad comes without any external dependencies - no ru
 Macroquad is supported by:
 
 [SourceGear](https://www.sourcegear.com/)
+
+### Optional wgpu backend
+
+Enable `wgpu` alongside `opengl`/`metal`, or use
+`default-features = false, features = ["wgpu"]` to select it by default.
+`Conf::platform.prefer_gfx_api = miniquad::conf::GfxApi::Wgpu` selects it
+explicitly. Built-in drawing and UI use native WGSL; materials can use
+`ShaderSource::Wgsl { program }` or the legacy GLSL compatibility path.
+
+The new window adapter targets desktop platforms and is tested locally on macOS.
+Mobile/browser startup and raw OpenGL helpers are not part of this backend yet.
+For a release smoke test covering text, UI, resize and offscreen readback:
+
+```sh
+cargo run --release --no-default-features --features wgpu --example wgpu_smoke
+```

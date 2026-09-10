@@ -1289,6 +1289,8 @@ pub(crate) mod ui_context {
             let material = self.material.get_or_insert_with(|| {
                 load_material(
                     match ctx.info().backend {
+                        #[cfg(feature = "wgpu")]
+                        Backend::Wgpu => ShaderSource::Wgsl { program: include_str!("shaders/default.wgsl") },
                         Backend::OpenGl => ShaderSource::Glsl {
                             vertex: VERTEX_SHADER,
                             fragment: FRAGMENT_SHADER,

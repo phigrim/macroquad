@@ -155,6 +155,8 @@ impl MagicSnapshotter {
         let shader = ctx
             .new_shader(
                 match ctx.info().backend {
+                    #[cfg(feature = "wgpu")]
+                    Backend::Wgpu => ShaderSource::Wgsl { program: include_str!("shaders/snapshot.wgsl") },
                     Backend::OpenGl => ShaderSource::Glsl {
                         vertex: snapshotter_shader::VERTEX,
                         fragment: snapshotter_shader::FRAGMENT,
@@ -401,6 +403,8 @@ impl PipelinesStorage {
         let shader = ctx
             .new_shader(
                 match ctx.info().backend {
+                    #[cfg(feature = "wgpu")]
+                    Backend::Wgpu => ShaderSource::Wgsl { program: include_str!("shaders/default.wgsl") },
                     Backend::OpenGl => ShaderSource::Glsl {
                         vertex: shader::VERTEX,
                         fragment: shader::FRAGMENT,
@@ -652,7 +656,7 @@ impl QuadGl {
 
         let source = match shader {
             ShaderSource::Glsl { fragment, .. } => fragment,
-            ShaderSource::Msl { program } => program,
+            ShaderSource::Msl { program } | ShaderSource::Wgsl { program } => program,
         };
         let wants_screen_texture = source.contains("_ScreenTexture");
         let shader = ctx.new_shader(shader, shader_meta)?;

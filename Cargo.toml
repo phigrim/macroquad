@@ -8,7 +8,7 @@ repository = "https://github.com/not-fl3/macroquad"
 description = """
 Simple and easy to use graphics library
 """
-readme="README.md"
+readme = "README.md"
 license = "MIT OR Apache-2.0"
 
 [features]
@@ -18,6 +18,7 @@ glam-serde = ["glam/serde"]
 default = ["opengl"]
 opengl = ["miniquad/opengl"]
 metal = ["miniquad/metal"]
+wgpu = ["miniquad/wgpu"]
 
 [package.metadata.android]
 assets = "examples/"
@@ -30,10 +31,15 @@ all-features = true
 
 [dependencies]
 # miniquad = { git = "https://github.com/phigrim/miniquad", features = ["log-impl"] }
-miniquad = { path = "../miniquad-upstream", default-features = false, features = ["log-impl"] }
+miniquad = { version = "0.4.10", path = "../miniquad-upstream", default-features = false, features = [
+    "log-impl",
+] }
 quad-rand = "0.2.3"
 glam = { version = "0.27", features = ["scalar-math"] }
-image = { version = "0.24", default-features = false, features = ["png", "tga"] }
+image = { version = "0.24", default-features = false, features = [
+    "png",
+    "tga",
+] }
 macroquad_macro = { version = "0.1.8", path = "macroquad_macro" }
 fontdue = "0.9"
 backtrace = { version = "0.3.60", optional = true }
@@ -55,3 +61,7 @@ macroquad = { path = './' }
 #miniquad = { path = '../miniquad' }
 #miniquad = { git = "https://github.com/not-fl3/miniquad", branch = "msaa_render_texture" }
 #quad-gl = {path = './quad-gl'}
+
+[[example]]
+name = "wgpu_smoke"
+required-features = ["wgpu"]
