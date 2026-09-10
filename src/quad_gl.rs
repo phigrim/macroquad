@@ -38,6 +38,22 @@ struct DrawCall {
     capture: bool,
 }
 
+#[inline]
+fn scale_to_framebuffer(value: i32, dpi_scale: f32) -> i32 {
+    (value as f32 * dpi_scale).round() as i32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scale_to_framebuffer;
+
+    #[test]
+    fn scales_logical_coordinates_to_retina_pixels() {
+        assert_eq!(scale_to_framebuffer(800, 2.0), 1600);
+        assert_eq!(scale_to_framebuffer(801, 1.5), 1202);
+    }
+}
+
 impl DrawCall {
     const fn new(
         texture: Option<miniquad::TextureId>,
@@ -702,6 +718,7 @@ impl QuadGl {
         assert_eq!(self.draw_calls_bindings.len(), self.draw_calls.len());
 
         let (screen_width, screen_height) = miniquad::window::screen_size();
+        let dpi_scale = miniquad::window::dpi_scale();
         let time = (miniquad::date::now() - self.start_time) as f32;
         let time = glam::vec4(time, time.sin(), time.cos(), 0.);
 
@@ -762,12 +779,26 @@ impl QuadGl {
 
             ctx.apply_pipeline(&pipeline.pipeline);
             if let Some((x, y, w, h)) = dc.viewport {
-                ctx.apply_viewport(x, y, w, h);
+                ctx.apply_viewport(
+                    scale_to_framebuffer(x, dpi_scale),
+                    scale_to_framebuffer(y, dpi_scale),
+                    scale_to_framebuffer(w, dpi_scale),
+                    scale_to_framebuffer(h, dpi_scale),
+                );
             } else {
                 ctx.apply_viewport(0, 0, width as i32, height as i32);
             }
             if let Some(clip) = dc.clip {
-                ctx.apply_scissor_rect(clip.0, height as i32 - (clip.1 + clip.3), clip.2, clip.3);
+                let clip_x = scale_to_framebuffer(clip.0, dpi_scale);
+                let clip_y = scale_to_framebuffer(clip.1, dpi_scale);
+                let clip_w = scale_to_framebuffer(clip.2, dpi_scale);
+                let clip_h = scale_to_framebuffer(clip.3, dpi_scale);
+                ctx.apply_scissor_rect(
+                    clip_x,
+                    height as i32 - clip_y - clip_h,
+                    clip_w,
+                    clip_h,
+                );
             } else {
                 ctx.apply_scissor_rect(0, 0, width as i32, height as i32);
             }
