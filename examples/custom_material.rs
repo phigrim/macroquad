@@ -131,20 +131,22 @@ fragment float4 fragmentShader(RasterizerData in [[stage_in]],
 }"#;
 
 fn window_conf() -> Conf {
-    let metal = std::env::args().nth(1).as_deref() == Some("metal");
-    let apple_gfx_api = if metal {
-        conf::AppleGfxApi::Metal
-    } else {
-        conf::AppleGfxApi::OpenGl
-    };
-    Conf {
+    let mut conf = Conf {
         window_title: "Shaders".to_owned(),
-        platform: conf::Platform {
-            apple_gfx_api,
-            ..Default::default()
-        },
         ..Default::default()
+    };
+    configure_conf(&mut conf);
+    conf
+}
+
+fn configure_conf(conf: &mut Conf) {
+    #[cfg(all(feature = "metal", target_vendor = "apple"))]
+    if std::env::args().nth(1).as_deref() == Some("metal") {
+        conf.platform.prefer_gfx_api = conf::GfxApi::Metal;
     }
+
+    #[cfg(not(all(feature = "metal", target_vendor = "apple")))]
+    let _ = conf;
 }
 
 #[macroquad::main(window_conf)]

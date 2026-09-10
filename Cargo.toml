@@ -15,7 +15,9 @@ license = "MIT OR Apache-2.0"
 audio = ["quad-snd"]
 log-rs = ["log"]
 glam-serde = ["glam/serde"]
-default = []
+default = ["opengl"]
+opengl = ["miniquad/opengl"]
+metal = ["miniquad/metal"]
 
 [package.metadata.android]
 assets = "examples/"
@@ -27,7 +29,8 @@ opt-level = 3
 all-features = true
 
 [dependencies]
-miniquad = { git = "https://github.com/phigrim/miniquad", features = ["log-impl"] }
+# miniquad = { git = "https://github.com/phigrim/miniquad", features = ["log-impl"] }
+miniquad = { path = "../miniquad-upstream", default-features = false, features = ["log-impl"] }
 quad-rand = "0.2.3"
 glam = { version = "0.27", features = ["scalar-math"] }
 image = { version = "0.24", default-features = false, features = ["png", "tga"] }
@@ -52,4 +55,3 @@ macroquad = { path = './' }
 #miniquad = { path = '../miniquad' }
 #miniquad = { git = "https://github.com/not-fl3/miniquad", branch = "msaa_render_texture" }
 #quad-gl = {path = './quad-gl'}
-
