@@ -755,6 +755,79 @@ impl Texture2D {
         texture
     }
 
+    /// Creates a static 2D texture from GPU-native compressed data.
+    ///
+    /// `bytes` must contain one complete mip level. The backend validates the
+    /// format, dimensions, byte count, and runtime support before uploading it.
+    pub fn from_compressed_data(
+        width: u16,
+        height: u16,
+        format: miniquad::CompressedTextureFormat,
+        bytes: &[u8],
+    ) -> Result<Texture2D, miniquad::TextureError> {
+        Self::from_compressed_mipmaps(width, height, format, &[bytes])
+    }
+
+    /// Creates a static 2D texture from GPU-native compressed mip levels.
+    pub fn from_compressed_mipmaps(
+        width: u16,
+        height: u16,
+        format: miniquad::CompressedTextureFormat,
+        mipmaps: &[&[u8]],
+    ) -> Result<Texture2D, miniquad::TextureError> {
+        Self::from_compressed_source(
+            miniquad::CompressedTextureSource::Mipmaps(mipmaps),
+            width,
+            height,
+            format,
+        )
+    }
+
+    /// Creates a static cubemap from GPU-native compressed mip levels.
+    pub fn from_compressed_cubemap(
+        width: u16,
+        height: u16,
+        format: miniquad::CompressedTextureFormat,
+        faces: &[&[&[u8]]],
+    ) -> Result<Texture2D, miniquad::TextureError> {
+        Self::from_compressed_source(
+            miniquad::CompressedTextureSource::CubeMap(faces),
+            width,
+            height,
+            format,
+        )
+    }
+
+    fn from_compressed_source(
+        source: miniquad::CompressedTextureSource,
+        width: u16,
+        height: u16,
+        format: miniquad::CompressedTextureFormat,
+    ) -> Result<Texture2D, miniquad::TextureError> {
+        let kind = match source {
+            miniquad::CompressedTextureSource::Mipmaps(_) => miniquad::TextureKind::Texture2D,
+            miniquad::CompressedTextureSource::CubeMap(_) => miniquad::TextureKind::CubeMap,
+        };
+        let texture = get_quad_context().new_compressed_texture_checked(
+            miniquad::TextureAccess::Static,
+            source,
+            miniquad::CompressedTextureParams {
+                kind,
+                format,
+                width: width as u32,
+                height: height as u32,
+                ..Default::default()
+            },
+        )?;
+        let ctx = get_context();
+        let texture = Texture2D {
+            texture: ctx.textures.store_texture(texture),
+        };
+        texture.set_filter(ctx.default_filter_mode);
+        ctx.texture_batcher.add_unbatched(&texture);
+        Ok(texture)
+    }
+
     /// Uploads [Image] data to this texture.
     pub fn update(&self, image: &Image) {
         let ctx = get_quad_context();
