@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use ab_glyph::{Font as AbGlyphFont, FontArc, PxScale, ScaleFont};
+
 use crate::{
     color::Color,
     get_context, get_quad_context,
@@ -29,7 +31,13 @@ pub(crate) struct CharacterInfo {
 /// TTF font loaded to GPU
 #[derive(Clone)]
 pub struct Font {
-    font: Arc<fontdue::Font>,
+    // `fontdue::Font` eagerly materializes the outline geometry for every
+    // glyph while parsing a font.  That is a particularly expensive choice
+    // for CJK UI fonts: a single 9 MiB font can turn into hundreds of MiB of
+    // live heap before the first character is drawn.  `FontArc` keeps the
+    // parsed tables and expands only the glyph that is actually rasterized,
+    // which is the same basic lifetime as the glyph atlas below.
+    font: FontArc,
     atlas: Arc<Mutex<Atlas>>,
     characters: Arc<Mutex<HashMap<(char, u16), CharacterInfo>>>,
 }
@@ -56,18 +64,18 @@ fn require_fn_to_be_send() {
 impl std::fmt::Debug for Font {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Font")
-            .field("font", &"fontdue::Font")
+            .field("font", &"ab_glyph::FontArc")
             .finish()
     }
 }
 
 impl Font {
     pub(crate) fn load_from_bytes(atlas: Arc<Mutex<Atlas>>, bytes: &[u8]) -> Result<Font, Error> {
+        let font = FontArc::try_from_vec(bytes.to_vec())
+            .map_err(|_| Error::FontError("The Font file couldn't be parsed"))?;
+
         Ok(Font {
-            font: Arc::new(fontdue::Font::from_bytes(
-                bytes,
-                fontdue::FontSettings::default(),
-            )?),
+            font,
             characters: Arc::new(Mutex::new(HashMap::new())),
             atlas,
         })
@@ -85,14 +93,16 @@ impl Font {
     }
 
     pub(crate) fn ascent(&self, font_size: f32) -> f32 {
-        self.font.horizontal_line_metrics(font_size).unwrap().ascent
+        self.font.as_scaled(PxScale::from(font_size)).ascent()
     }
 
     pub(crate) fn descent(&self, font_size: f32) -> f32 {
-        self.font
-            .horizontal_line_metrics(font_size)
-            .unwrap()
-            .descent
+        self.font.as_scaled(PxScale::from(font_size)).descent()
+    }
+
+    pub(crate) fn line_height(&self, font_size: f32) -> f32 {
+        let scaled = self.font.as_scaled(PxScale::from(font_size));
+        scaled.height() + scaled.line_gap()
     }
 
     pub(crate) fn cache_glyph(&self, character: char, size: u16) {
@@ -100,37 +110,72 @@ impl Font {
             return;
         }
 
-        let (metrics, bitmap) = self.font.rasterize(character, size as f32);
-
-        let (width, height) = (metrics.width as u16, metrics.height as u16);
-
         let sprite = self.atlas.lock().unwrap().new_unique_id();
-        self.atlas.lock().unwrap().cache_sprite(
-            sprite,
-            Image {
-                bytes: bitmap
-                    .iter()
-                    .flat_map(|coverage| [255, 255, 255, *coverage])
-                    .collect(),
-                width,
-                height,
-            },
-        );
-        let advance = metrics.advance_width;
+        let scaled = self.font.as_scaled(PxScale::from(size as f32));
+        let glyph_id = scaled.glyph_id(character);
+        let advance = scaled.h_advance(glyph_id);
 
-        let (offset_x, offset_y) = (metrics.xmin, metrics.ymin);
+        // Keep the old fontdue coordinate convention used by macroquad's
+        // draw path: `offset_y` is the y coordinate of the bottom of the
+        // glyph relative to the baseline.  ab_glyph's pixel bounds use a
+        // screen-space y axis, so its bottom is `-max.y`.
+        if let Some(outlined) = scaled.outline_glyph(scaled.scaled_glyph(character)) {
+            let bounds = outlined.px_bounds();
+            let width = bounds.width().max(0.0) as u16;
+            let height = bounds.height().max(0.0) as u16;
+            let mut bitmap = vec![0u8; width as usize * height as usize];
 
-        let character_info = CharacterInfo {
-            advance,
-            offset_x,
-            offset_y,
-            sprite,
-        };
+            outlined.draw(|x, y, coverage| {
+                let x = x as usize;
+                let y = y as usize;
+                if x < width as usize && y < height as usize {
+                    bitmap[y * width as usize + x] =
+                        (coverage.clamp(0.0, 1.0) * 255.0).round() as u8;
+                }
+            });
 
-        self.characters
-            .lock()
-            .unwrap()
-            .insert((character, size), character_info);
+            self.atlas.lock().unwrap().cache_sprite(
+                sprite,
+                Image {
+                    bytes: bitmap
+                        .iter()
+                        .flat_map(|coverage| [255, 255, 255, *coverage])
+                        .collect(),
+                    width,
+                    height,
+                },
+            );
+
+            self.characters.lock().unwrap().insert(
+                (character, size),
+                CharacterInfo {
+                    advance,
+                    offset_x: bounds.min.x as i32,
+                    offset_y: -bounds.max.y as i32,
+                    sprite,
+                },
+            );
+        } else {
+            // Spaces and other no-outline glyphs still have advance metrics,
+            // but do not need an atlas allocation.
+            self.atlas.lock().unwrap().cache_sprite(
+                sprite,
+                Image {
+                    bytes: Vec::new(),
+                    width: 0,
+                    height: 0,
+                },
+            );
+            self.characters.lock().unwrap().insert(
+                (character, size),
+                CharacterInfo {
+                    advance,
+                    offset_x: 0,
+                    offset_y: 0,
+                    sprite,
+                },
+            );
+        }
     }
 
     pub(crate) fn get(&self, character: char, size: u16) -> Option<CharacterInfo> {
@@ -355,8 +400,11 @@ pub fn draw_text_ex(text: impl AsRef<str>, x: f32, y: f32, params: TextParams) -
             font.cache_glyph(character, font_size);
         }
 
+        let scaled_font = font.font.as_scaled(PxScale::from(font_size_f32));
         let kerning_offset = last_character
-            .and_then(|left| font.font.horizontal_kern(left, character, font_size_f32))
+            .map(|left| {
+                scaled_font.kern(scaled_font.glyph_id(left), scaled_font.glyph_id(character))
+            })
             .unwrap_or(0.0);
         last_character = Some(character);
 
@@ -451,17 +499,12 @@ pub fn draw_multiline_text_ex(
     let line_distance = match line_distance_factor {
         Some(distance) => distance,
         None => {
-            let mut font_line_distance = 0.0;
             let font = if let Some(font) = params.font {
                 font
             } else {
                 &get_default_font()
             };
-            if let Some(metrics) = font.font.horizontal_line_metrics(1.0) {
-                font_line_distance = metrics.new_line_size;
-            }
-
-            font_line_distance
+            font.line_height(1.0)
         }
     };
 
@@ -521,10 +564,7 @@ pub fn measure_multiline_text(
     let font = font.unwrap_or_else(|| &get_context().fonts_storage.default_font);
     let line_distance = match line_distance_factor {
         Some(distance) => distance,
-        None => match font.font.horizontal_line_metrics(1.0) {
-            Some(metrics) => metrics.new_line_size,
-            None => 1.0,
-        },
+        None => font.line_height(1.0),
     };
 
     let mut dimensions = TextDimensions::default();
