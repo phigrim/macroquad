@@ -156,7 +156,9 @@ impl MagicSnapshotter {
             .new_shader(
                 match ctx.info().backend {
                     #[cfg(feature = "wgpu")]
-                    Backend::Wgpu => ShaderSource::Wgsl { program: include_str!("shaders/snapshot.wgsl") },
+                    Backend::Wgpu => ShaderSource::Wgsl {
+                        program: include_str!("shaders/snapshot.wgsl"),
+                    },
                     Backend::OpenGl => ShaderSource::Glsl {
                         vertex: snapshotter_shader::VERTEX,
                         fragment: snapshotter_shader::FRAGMENT,
@@ -404,7 +406,9 @@ impl PipelinesStorage {
             .new_shader(
                 match ctx.info().backend {
                     #[cfg(feature = "wgpu")]
-                    Backend::Wgpu => ShaderSource::Wgsl { program: include_str!("shaders/default.wgsl") },
+                    Backend::Wgpu => ShaderSource::Wgsl {
+                        program: include_str!("shaders/default.wgsl"),
+                    },
                     Backend::OpenGl => ShaderSource::Glsl {
                         vertex: shader::VERTEX,
                         fragment: shader::FRAGMENT,
@@ -511,7 +515,11 @@ impl PipelinesStorage {
             params,
         );
 
-        while self.pipelines.get(self.first_hole).map_or(false, |it| it.is_some()) {
+        while self
+            .pipelines
+            .get(self.first_hole)
+            .map_or(false, |it| it.is_some())
+        {
             self.first_hole += 1;
         }
         if self.first_hole == self.pipelines.len() {
@@ -700,7 +708,7 @@ impl QuadGl {
     pub fn draw(&mut self, ctx: &mut dyn miniquad::RenderingBackend, projection: glam::Mat4) {
         let white_texture = self.white_texture;
 
-        for _ in 0..self.draw_calls.len() - self.draw_calls_bindings.len() {
+        if self.draw_calls_bindings.is_empty() {
             let vertex_buffer = ctx.new_buffer(
                 BufferType::VertexBuffer,
                 BufferUsage::Stream,
@@ -719,17 +727,14 @@ impl QuadGl {
 
             self.draw_calls_bindings.push(bindings);
         }
-        assert_eq!(self.draw_calls_bindings.len(), self.draw_calls.len());
+        let bindings = &mut self.draw_calls_bindings[0];
 
         let (screen_width, screen_height) = miniquad::window::screen_size();
         let dpi_scale = miniquad::window::dpi_scale();
         let time = (miniquad::date::now() - self.start_time) as f32;
         let time = glam::vec4(time, time.sin(), time.cos(), 0.);
 
-        for (dc, bindings) in self.draw_calls[0..self.draw_calls_count]
-            .iter_mut()
-            .zip(self.draw_calls_bindings.iter_mut())
-        {
+        for dc in self.draw_calls[0..self.draw_calls_count].iter_mut() {
             let pipeline = self.pipelines.get_quad_pipeline_mut(dc.pipeline);
 
             let (width, height) = if let Some(render_pass) = dc.render_pass {
@@ -797,12 +802,7 @@ impl QuadGl {
                 let clip_y = scale_to_framebuffer(clip.1, dpi_scale);
                 let clip_w = scale_to_framebuffer(clip.2, dpi_scale);
                 let clip_h = scale_to_framebuffer(clip.3, dpi_scale);
-                ctx.apply_scissor_rect(
-                    clip_x,
-                    height as i32 - clip_y - clip_h,
-                    clip_w,
-                    clip_h,
-                );
+                ctx.apply_scissor_rect(clip_x, height as i32 - clip_y - clip_h, clip_w, clip_h);
             } else {
                 ctx.apply_scissor_rect(0, 0, width as i32, height as i32);
             }

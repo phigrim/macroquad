@@ -175,11 +175,14 @@ impl Painter {
     /// usually used as an advance between current cursor position
     /// and next potential character
     pub fn character_advance(&self, character: char, font: &Font, font_size: u16) -> f32 {
-        if let Some(font_data) = font.get(character, font_size) {
-            return font_data.advance;
+        if font.get(character, font_size).is_none() {
+            // Fonts are populated lazily now. This path is used by edit-box
+            // cursor/selection layout, before the character is necessarily
+            // emitted by draw_character.
+            font.cache_glyph(character, font_size);
         }
-
-        0.
+        font.get(character, font_size)
+            .map_or(0.0, |font_data| font_data.advance)
     }
 
     pub fn content_with_margins_size(&self, style: &Style, content: &UiContent) -> Vec2 {

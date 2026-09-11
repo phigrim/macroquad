@@ -236,7 +236,8 @@ impl Font {
 }
 
 impl Font {
-    /// List of ascii characters, may be helpful in combination with "populate_font_cache"
+    /// List of ASCII characters, useful when an application deliberately wants
+    /// to warm the glyph cache ahead of time.
     pub fn ascii_character_list() -> Vec<char> {
         (0..255).filter_map(::std::char::from_u32).collect()
     }
@@ -336,8 +337,6 @@ pub fn load_ttf_font_from_bytes(bytes: &[u8]) -> Result<Font, Error> {
     )));
 
     let mut font = Font::load_from_bytes(atlas.clone(), bytes)?;
-
-    font.populate_font_cache(&Font::ascii_character_list(), 15);
 
     let ctx = get_context();
 

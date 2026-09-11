@@ -657,10 +657,6 @@ impl Ui {
             crate::text::Font::load_from_bytes(atlas.clone(), include_bytes!("ProggyClean.ttf"))
                 .unwrap();
 
-        for character in crate::text::Font::ascii_character_list() {
-            font.cache_glyph(character, 13);
-        }
-
         atlas
             .lock()
             .unwrap()
@@ -1290,7 +1286,9 @@ pub(crate) mod ui_context {
                 load_material(
                     match ctx.info().backend {
                         #[cfg(feature = "wgpu")]
-                        Backend::Wgpu => ShaderSource::Wgsl { program: include_str!("shaders/default.wgsl") },
+                        Backend::Wgpu => ShaderSource::Wgsl {
+                            program: include_str!("shaders/default.wgsl"),
+                        },
                         Backend::OpenGl => ShaderSource::Glsl {
                             vertex: VERTEX_SHADER,
                             fragment: FRAGMENT_SHADER,

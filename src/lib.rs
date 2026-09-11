@@ -300,7 +300,13 @@ impl MiniquadInputEvent {
                 repeat,
             } => t.key_down_event(*keycode, *modifiers, *repeat),
             KeyUp { keycode, modifiers } => t.key_up_event(*keycode, *modifiers),
-            Touch { phase, id, x, y, time } => t.touch_event(*phase, *id, *x, *y, *time),
+            Touch {
+                phase,
+                id,
+                x,
+                y,
+                time,
+            } => t.touch_event(*phase, *id, *x, *y, *time),
             WindowMinimized => t.window_minimized_event(),
             WindowRestored => t.window_restored_event(),
         }
@@ -676,10 +682,15 @@ impl EventHandler for Stage {
             miniquad::window::schedule_update();
         };
 
-        context
-            .input_events
-            .iter_mut()
-            .for_each(|arr| arr.push(MiniquadInputEvent::Touch { phase, id, x, y, time }));
+        context.input_events.iter_mut().for_each(|arr| {
+            arr.push(MiniquadInputEvent::Touch {
+                phase,
+                id,
+                x,
+                y,
+                time,
+            })
+        });
 
         if context.update_on.mouse_down {
             miniquad::window::schedule_update();
@@ -710,7 +721,9 @@ impl EventHandler for Stage {
         let context = get_context();
         context.ime_preedit.0.clear();
         context.ime_preedit.1 = 0;
-        context.ime_commit_queue.push(text.map(|value| value.to_string()));
+        context
+            .ime_commit_queue
+            .push(text.map(|value| value.to_string()));
     }
 
     fn on_ime_state_changed(
