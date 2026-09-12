@@ -6,7 +6,7 @@ pub use miniquad::{FilterMode, TextureId as MiniquadTexture, UniformDesc};
 
 use crate::{color::Color, logging::warn, telemetry, texture::Texture2D, tobytes::ToBytes, Error};
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 pub(crate) use crate::models::Vertex;
 
@@ -306,6 +306,7 @@ struct Uniform {
 #[derive(Clone)]
 struct PipelineExt {
     pipeline: miniquad::Pipeline,
+    shader: ShaderId,
     wants_screen_texture: bool,
     uniforms: Vec<Uniform>,
     uniforms_data: Vec<u8>,
@@ -393,6 +394,7 @@ impl PipelineExt {
 struct PipelinesStorage {
     pipelines: Vec<Option<PipelineExt>>,
     first_hole: usize,
+    shader_refs: HashMap<ShaderId, usize>,
 }
 
 impl PipelinesStorage {
@@ -433,6 +435,7 @@ impl PipelinesStorage {
         let mut storage = PipelinesStorage {
             pipelines: Default::default(),
             first_hole: 0,
+            shader_refs: Default::default(),
         };
 
         let triangles_pipeline = storage.make_pipeline(
@@ -552,12 +555,14 @@ impl PipelinesStorage {
 
         self.pipelines[id] = Some(PipelineExt {
             pipeline,
+            shader,
             wants_screen_texture,
             uniforms,
             uniforms_data: vec![0; max_offset],
             textures,
             textures_data: BTreeMap::new(),
         });
+        *self.shader_refs.entry(shader).or_default() += 1;
 
         GlPipeline(id)
     }
@@ -575,8 +580,21 @@ impl PipelinesStorage {
         self.pipelines[pip.0].as_mut().unwrap()
     }
 
-    fn delete_pipeline(&mut self, pip: GlPipeline) {
-        self.pipelines[pip.0] = None;
+    fn delete_pipeline(&mut self, ctx: &mut dyn RenderingBackend, pip: GlPipeline) {
+        let Some(ext) = self.pipelines.get_mut(pip.0).and_then(Option::take) else {
+            return;
+        };
+        // Pipeline/Shader are raw miniquad resources. Dropping only the
+        // wrapper used to leave the backend RenderPipeline alive forever,
+        // which was especially visible with wgpu/Metal after leaving a chart.
+        ctx.delete_pipeline(ext.pipeline);
+        if let Some(ref_count) = self.shader_refs.get_mut(&ext.shader) {
+            *ref_count -= 1;
+            if *ref_count == 0 {
+                self.shader_refs.remove(&ext.shader);
+                ctx.delete_shader(ext.shader);
+            }
+        }
         self.first_hole = self.first_hole.min(pip.0);
     }
 }
@@ -995,8 +1013,12 @@ impl QuadGl {
         dc.texture = self.state.texture;
     }
 
-    pub fn delete_pipeline(&mut self, pipeline: GlPipeline) {
-        self.pipelines.delete_pipeline(pipeline);
+    pub fn delete_pipeline(
+        &mut self,
+        ctx: &mut dyn miniquad::RenderingBackend,
+        pipeline: GlPipeline,
+    ) {
+        self.pipelines.delete_pipeline(ctx, pipeline);
     }
 
     pub fn set_uniform<T>(&mut self, pipeline: GlPipeline, name: &str, uniform: T) {

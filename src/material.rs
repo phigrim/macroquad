@@ -9,7 +9,10 @@ struct GlPipelineGuarded(GlPipeline);
 
 impl Drop for GlPipelineGuarded {
     fn drop(&mut self) {
-        get_context().gl.delete_pipeline(self.0);
+        let context = get_context();
+        context
+            .gl
+            .delete_pipeline(&mut *context.quad_context, self.0);
     }
 }
 
