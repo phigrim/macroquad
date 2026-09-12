@@ -9,10 +9,12 @@ pub async fn load_file(path: &str) -> Result<Vec<u8>, Error> {
         use std::sync::{Arc, Mutex};
 
         let contents = Arc::new(Mutex::new(None));
+        let waker = exec::WakerRegistration::new();
         let path = path.to_owned();
 
         {
             let contents = contents.clone();
+            let waker = waker.clone();
             let err_path = path.clone();
 
             miniquad::fs::load_file(&path, move |bytes| {
@@ -20,10 +22,12 @@ pub async fn load_file(path: &str) -> Result<Vec<u8>, Error> {
                     kind,
                     path: err_path.clone(),
                 }));
+
+                waker.wake();
             });
         }
 
-        exec::FileLoadingFuture { contents }
+        exec::FileLoadingFuture { contents, waker }
     }
 
     #[cfg(any(target_os = "ios", target_os = "tvos"))]

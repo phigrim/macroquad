@@ -19,6 +19,8 @@ default = ["opengl"]
 opengl = ["miniquad/opengl"]
 metal = ["miniquad/metal"]
 wgpu = ["miniquad/wgpu"]
+# Opt in to wake-driven polling and cross-thread future wakeups.
+waker = []
 
 [package.metadata.android]
 assets = "examples/"
@@ -60,6 +62,11 @@ macroquad = { path = './' }
 #miniquad = { path = '../miniquad' }
 #miniquad = { git = "https://github.com/not-fl3/miniquad", branch = "msaa_render_texture" }
 #quad-gl = {path = './quad-gl'}
+
+# Use the sibling miniquad checkout while developing the runtime/backend
+# integration. Remove this override before publishing the crate.
+# [patch."https://github.com/phigrim/miniquad"]
+# miniquad = { path = "../miniquad-upstream" }
 
 [[example]]
 name = "wgpu_smoke"

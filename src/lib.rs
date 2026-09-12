@@ -42,6 +42,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
+use std::task::Poll;
 
 mod exec;
 mod quad_gl;
@@ -151,6 +152,7 @@ use crate::{
     quad_gl::QuadGl,
     texture::TextureHandle,
     ui::ui_context::UiContext,
+    exec::Task
 };
 
 use glam::{vec2, Mat4, Vec2};
@@ -524,7 +526,7 @@ fn get_quad_context() -> &'static mut dyn miniquad::RenderingBackend {
 }
 
 struct Stage {
-    main_future: Pin<Box<dyn Future<Output = ()>>>,
+    main_task: Task<()>,
 }
 
 impl EventHandler for Stage {
@@ -833,8 +835,7 @@ impl EventHandler for Stage {
                 AssertUnwindSafe(|| {
                     let _z = telemetry::ZoneGuard::new("Event::draw user code");
 
-                    if exec::resume(&mut self.main_future).is_some() {
-                        self.main_future = Box::pin(async move {});
+                    if self.main_task.claim() && matches!(self.main_task.poll(), Poll::Ready(())) {
                         miniquad::window::quit();
                         return;
                     }
@@ -844,7 +845,7 @@ impl EventHandler for Stage {
 
             if result == false {
                 if let Some(recovery_future) = get_context().recovery_future.take() {
-                    self.main_future = recovery_future;
+                    self.main_task = Task::from_pinned(recovery_future);
                 }
             }
 
@@ -937,10 +938,11 @@ pub mod conf {
     #[derive(Debug)]
     pub struct Conf {
         pub miniquad_conf: miniquad::conf::Conf,
-        /// With miniquad_conf.platform.blocking_event_loop = true,
-        /// next_frame().await will never finish and will wait forever with
-        /// zero CPU usage.
-        /// update_on will tell macroquad when to proceed with the event loop.
+        /// With `miniquad_conf.platform.blocking_event_loop = true`, enabling
+        /// the `waker` feature lets `next_frame().await` schedule the next
+        /// update and lets waker-aware futures wake the loop directly. Without
+        /// `waker`, the legacy behavior is preserved and `next_frame().await`
+        /// does not advance a blocking event loop.
         pub update_on: Option<UpdateTrigger>,
         pub default_filter_mode: crate::FilterMode,
         /// Macroquad performs automatic and static batching for each
@@ -1019,7 +1021,7 @@ impl Window {
             unsafe { CONTEXT = Some(context) };
 
             Box::new(Stage {
-                main_future: Box::pin(async {
+                main_task: Task::new(async {
                     future.await;
                     unsafe {
                         if let Some(ctx) = CONTEXT.as_mut() {

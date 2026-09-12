@@ -9,7 +9,7 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use crate::exec::resume;
+use crate::exec::Task;
 use crate::get_context;
 
 mod generational_storage;
@@ -17,13 +17,28 @@ mod generational_storage;
 use generational_storage::{GenerationalId, GenerationalStorage};
 
 struct CoroutineInternal {
-    future: Pin<Box<dyn Future<Output = Box<dyn Any>>>>,
+    task: Task<Box<dyn Any>>,
     manual_poll: bool,
     manual_time: Option<f64>,
     // if return value of a coroutine is () there is no need to
     // keep coroutine's memory allocated until the user retrieves the data
     // we can free the memory right away, and just return () on retrieve
     has_value: bool,
+}
+
+impl CoroutineInternal {
+    #[inline]
+    fn is_runnable(&self) -> bool {
+        self.task.claim()
+    }
+
+    #[inline]
+    fn poll(&mut self) -> Option<Box<dyn Any>> {
+        match self.task.poll() {
+            Poll::Ready(value) => Some(value),
+            Poll::Pending => None,
+        }
+    }
 }
 
 enum CoroutineState {
@@ -71,8 +86,8 @@ impl CoroutinesContext {
     pub fn update(&mut self) {
         self.coroutines.retain(|coroutine| {
             if let CoroutineState::Running(ref mut f) = coroutine {
-                if f.manual_poll == false {
-                    if let Some(v) = resume(&mut f.future) {
+                if !f.manual_poll && f.is_runnable() {
+                    if let Some(v) = f.poll() {
                         if f.has_value {
                             *coroutine = CoroutineState::Value(v);
                         } else {
@@ -135,7 +150,10 @@ impl<T: 'static + Any> Coroutine<T> {
         None
     }
 
-    /// By default coroutines are being polled each frame, inside the "next_frame()"
+    /// Coroutines advance at frame boundaries by default. With the `waker`
+    /// feature enabled, a coroutine that awaits an event-driven future is
+    /// polled again when that future wakes it; frame-driven futures such as
+    /// `next_frame()` still advance once per frame.
     ///
     /// ```skip
     /// start_coroutine(async move {
@@ -186,7 +204,7 @@ impl<T: 'static + Any> Coroutine<T> {
             context.active_coroutine_now = f.manual_time;
             context.active_coroutine_delta = Some(delta_time);
             *f.manual_time.as_mut().unwrap() += delta_time;
-            if let Some(v) = resume(&mut f.future) {
+            if let Some(v) = f.poll() {
                 if f.has_value {
                     *coroutine = CoroutineState::Value(v);
                 } else {
@@ -209,7 +227,7 @@ pub fn start_coroutine<T: 'static + Any>(
     let id = context
         .coroutines
         .push(CoroutineState::Running(CoroutineInternal {
-            future: Box::pin(async { Box::new(future.await) as _ }),
+            task: Task::new(async { Box::new(future.await) as _ }),
             has_value,
             manual_poll: false,
             manual_time: None,
@@ -240,7 +258,7 @@ pub struct TimerDelayFuture {
 impl Future for TimerDelayFuture {
     type Output = Option<()>;
 
-    fn poll(mut self: Pin<&mut Self>, _: &mut Context) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context) -> Poll<Self::Output> {
         let delta = get_context()
             .coroutines_context
             .active_coroutine_delta
@@ -251,6 +269,7 @@ impl Future for TimerDelayFuture {
         if self.remaining_time <= 0.0 {
             Poll::Ready(Some(()))
         } else {
+            crate::exec::wake(context);
             Poll::Pending
         }
     }
@@ -293,7 +312,7 @@ pub mod tweens {
     {
         type Output = ();
 
-        fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Self::Output> {
+        fn poll(self: Pin<&mut Self>, context: &mut Context) -> Poll<Self::Output> {
             let t = (miniquad::date::now() - self.start_time) / self.time as f64;
             let this = self.get_mut();
             let var = this.lens.get();
@@ -307,6 +326,7 @@ pub mod tweens {
             if t <= 1. {
                 *var = this.from + (this.to - this.from) * t as f32;
 
+                crate::exec::wake(context);
                 Poll::Pending
             } else {
                 *var = this.to;
