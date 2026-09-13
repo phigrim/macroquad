@@ -149,10 +149,10 @@ pub use miniquad;
 
 use crate::{
     color::{colors::*, Color},
+    exec::Task,
     quad_gl::QuadGl,
     texture::TextureHandle,
     ui::ui_context::UiContext,
-    exec::Task
 };
 
 use glam::{vec2, Mat4, Vec2};

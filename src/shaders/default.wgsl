@@ -9,7 +9,7 @@ struct Uniforms {
 struct Vertex {
     @location(0) position: vec3<f32>,
     @location(1) texcoord: vec2<f32>,
-    @location(2) color0: vec4<f32>,
+    @location(2) color0: vec4<u32>,
 };
 struct Varyings {
     @builtin(position) position: vec4<f32>,
@@ -22,7 +22,7 @@ struct Varyings {
     clip.z = (clip.z + clip.w) * 0.5;
     out.position = clip;
     out.uv = vertex.texcoord;
-    out.color = vertex.color0 / 255.0;
+    out.color = vec4<f32>(vertex.color0) / 255.0;
     return out;
 }
 @fragment fn fs_main(in: Varyings) -> @location(0) vec4<f32> {
