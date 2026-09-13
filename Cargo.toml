@@ -66,7 +66,7 @@ macroquad = { path = './' }
 # Use the sibling miniquad checkout while developing the runtime/backend
 # integration. Remove this override before publishing the crate.
 # [patch."https://github.com/phigrim/miniquad"]
-# miniquad = { path = "../miniquad-upstream" }
+# miniquad = { path = "../miniquad" }
 
 [[example]]
 name = "wgpu_smoke"

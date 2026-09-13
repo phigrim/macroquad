@@ -92,6 +92,22 @@ struct MagicSnapshotter {
 mod snapshotter_shader {
     use miniquad::{ShaderMeta, UniformBlockLayout};
 
+    pub const WGSL: &str = r#"
+@group(0) @binding(1) var Texture: texture_2d<f32>;
+@group(0) @binding(2) var texture_sampler: sampler;
+struct Vertex { @location(0) position: vec2<f32>, @location(1) texcoord: vec2<f32> };
+struct Varyings { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f32> };
+@vertex fn vs_main(vertex: Vertex) -> Varyings {
+    var out: Varyings;
+    out.position = vec4(vertex.position, 0.5, 1.0);
+    out.uv = vertex.texcoord;
+    return out;
+}
+@fragment fn fs_main(in: Varyings) -> @location(0) vec4<f32> {
+    return textureSample(Texture, texture_sampler, in.uv);
+}
+"#;
+
     pub const VERTEX: &str = r#"#version 100
     attribute vec2 position;
     attribute vec2 texcoord;
@@ -155,16 +171,16 @@ impl MagicSnapshotter {
         let shader = ctx
             .new_shader(
                 match ctx.info().backend {
-                    #[cfg(feature = "wgpu")]
-                    Backend::Wgpu => ShaderSource::Wgsl {
-                        program: include_str!("shaders/snapshot.wgsl"),
-                    },
                     Backend::OpenGl => ShaderSource::Glsl {
                         vertex: snapshotter_shader::VERTEX,
                         fragment: snapshotter_shader::FRAGMENT,
                     },
                     Backend::Metal => ShaderSource::Msl {
                         program: snapshotter_shader::METAL,
+                    },
+                    #[cfg(feature = "wgpu")]
+                    Backend::Wgpu => ShaderSource::Wgsl {
+                        program: snapshotter_shader::WGSL,
                     },
                 },
                 snapshotter_shader::meta(),
@@ -407,16 +423,16 @@ impl PipelinesStorage {
         let shader = ctx
             .new_shader(
                 match ctx.info().backend {
-                    #[cfg(feature = "wgpu")]
-                    Backend::Wgpu => ShaderSource::Wgsl {
-                        program: include_str!("shaders/default.wgsl"),
-                    },
                     Backend::OpenGl => ShaderSource::Glsl {
                         vertex: shader::VERTEX,
                         fragment: shader::FRAGMENT,
                     },
                     Backend::Metal => ShaderSource::Msl {
                         program: shader::METAL,
+                    },
+                    #[cfg(feature = "wgpu")]
+                    Backend::Wgpu => ShaderSource::Wgsl {
+                        program: shader::WGSL,
                     },
                 },
                 shader::meta(),
@@ -682,7 +698,9 @@ impl QuadGl {
 
         let source = match shader {
             ShaderSource::Glsl { fragment, .. } => fragment,
-            ShaderSource::Msl { program } | ShaderSource::Wgsl { program } => program,
+            ShaderSource::Msl { program } => program,
+            #[cfg(feature = "wgpu")]
+            ShaderSource::Wgsl { program } => program,
         };
         let wants_screen_texture = source.contains("_ScreenTexture");
         let shader = ctx.new_shader(shader, shader_meta)?;
@@ -746,6 +764,40 @@ impl QuadGl {
             self.draw_calls_bindings.push(bindings);
         }
         let bindings = &mut self.draw_calls_bindings[0];
+        #[cfg(feature = "wgpu")]
+        let wgpu_batch_upload = matches!(ctx.info().backend, Backend::Wgpu);
+        #[cfg(not(feature = "wgpu"))]
+        let wgpu_batch_upload = false;
+        if wgpu_batch_upload && self.draw_calls_count != 0 {
+            let vertex_bytes = self.batch_vertex_buffer.len() * std::mem::size_of::<Vertex>();
+            if ctx.buffer_size(bindings.vertex_buffers[0]) < vertex_bytes {
+                ctx.delete_buffer(bindings.vertex_buffers[0]);
+                bindings.vertex_buffers[0] = ctx.new_buffer(
+                    BufferType::VertexBuffer,
+                    BufferUsage::Stream,
+                    BufferSource::empty::<Vertex>(
+                        self.batch_vertex_buffer.len().next_power_of_two(),
+                    ),
+                );
+            }
+            let index_bytes = self.batch_index_buffer.len() * std::mem::size_of::<u16>();
+            if ctx.buffer_size(bindings.index_buffer) < index_bytes {
+                ctx.delete_buffer(bindings.index_buffer);
+                bindings.index_buffer = ctx.new_buffer(
+                    BufferType::IndexBuffer,
+                    BufferUsage::Stream,
+                    BufferSource::empty::<u16>(self.batch_index_buffer.len().next_power_of_two()),
+                );
+            }
+            ctx.buffer_update(
+                bindings.vertex_buffers[0],
+                BufferSource::slice(&self.batch_vertex_buffer),
+            );
+            ctx.buffer_update(
+                bindings.index_buffer,
+                BufferSource::slice(&self.batch_index_buffer),
+            );
+        }
 
         let (screen_width, screen_height) = miniquad::window::screen_size();
         let dpi_scale = miniquad::window::dpi_scale();
@@ -773,20 +825,22 @@ impl QuadGl {
                 ctx.begin_default_pass(PassAction::Nothing);
             }
 
-            ctx.buffer_update(
-                bindings.vertex_buffers[0],
-                BufferSource::slice(
-                    &self.batch_vertex_buffer
-                        [dc.vertices_start..(dc.vertices_start + dc.vertices_count)],
-                ),
-            );
-            ctx.buffer_update(
-                bindings.index_buffer,
-                BufferSource::slice(
-                    &self.batch_index_buffer
-                        [dc.indices_start..(dc.indices_start + dc.indices_count)],
-                ),
-            );
+            if !wgpu_batch_upload {
+                ctx.buffer_update(
+                    bindings.vertex_buffers[0],
+                    BufferSource::slice(
+                        &self.batch_vertex_buffer
+                            [dc.vertices_start..(dc.vertices_start + dc.vertices_count)],
+                    ),
+                );
+                ctx.buffer_update(
+                    bindings.index_buffer,
+                    BufferSource::slice(
+                        &self.batch_index_buffer
+                            [dc.indices_start..(dc.indices_start + dc.indices_count)],
+                    ),
+                );
+            }
 
             bindings.images[0] = dc.texture.unwrap_or(white_texture);
             bindings.images[1] = self
@@ -838,7 +892,16 @@ impl QuadGl {
                 pipeline.uniforms_data.as_ptr(),
                 pipeline.uniforms_data.len(),
             );
-            ctx.draw(0, dc.indices_count as i32, 1);
+            if wgpu_batch_upload {
+                ctx.draw_with_base_vertex(
+                    dc.indices_start as i32,
+                    dc.indices_count as i32,
+                    1,
+                    dc.vertices_start as i32,
+                );
+            } else {
+                ctx.draw(0, dc.indices_count as i32, 1);
+            }
             ctx.end_render_pass();
 
             if dc.capture {
@@ -1100,6 +1163,39 @@ impl QuadGl {
 
 mod shader {
     use miniquad::{ShaderMeta, UniformBlockLayout, UniformDesc, UniformType};
+
+    pub const WGSL: &str = r#"
+struct Uniforms {
+    Projection: mat4x4<f32>,
+    Model: mat4x4<f32>,
+    _Time: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(0) @binding(1) var Texture: texture_2d<f32>;
+@group(0) @binding(2) var texture_sampler: sampler;
+struct Vertex {
+    @location(0) position: vec3<f32>,
+    @location(1) texcoord: vec2<f32>,
+    @location(2) color0: vec4<u32>,
+};
+struct Varyings {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) color: vec4<f32>,
+};
+@vertex fn vs_main(vertex: Vertex) -> Varyings {
+    var out: Varyings;
+    var clip = uniforms.Projection * uniforms.Model * vec4(vertex.position, 1.0);
+    clip.z = (clip.z + clip.w) * 0.5;
+    out.position = clip;
+    out.uv = vertex.texcoord;
+    out.color = vec4<f32>(vertex.color0) / 255.0;
+    return out;
+}
+@fragment fn fs_main(in: Varyings) -> @location(0) vec4<f32> {
+    return textureSample(Texture, texture_sampler, in.uv) * in.color;
+}
+"#;
 
     pub const VERTEX: &str = r#"#version 100
     attribute vec3 position;
