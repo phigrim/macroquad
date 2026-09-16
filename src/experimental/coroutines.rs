@@ -109,11 +109,19 @@ impl CoroutinesContext {
         self.coroutines.count()
     }
 }
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub struct Coroutine<T = ()> {
     id: GenerationalId,
     _phantom: PhantomData<T>,
 }
+
+impl<T> Clone for Coroutine<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for Coroutine<T> {}
 
 impl<T: 'static + Any> Coroutine<T> {
     /// Returns true if the coroutine finished or was stopped.
@@ -218,7 +226,7 @@ impl<T: 'static + Any> Coroutine<T> {
 }
 
 pub fn start_coroutine<T: 'static + Any>(
-    future: impl Future<Output = T> + 'static + Send,
+    future: impl Future<Output = T> + 'static,
 ) -> Coroutine<T> {
     let context = &mut get_context().coroutines_context;
 
