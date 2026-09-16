@@ -253,6 +253,11 @@ pub fn stop_all_coroutines() {
     context.coroutines.clear();
 }
 
+/// Stop a coroutine and invalidate all handles referring to it.
+///
+/// `Coroutine` is a `Copy` handle, so stopping one alias also stops the
+/// coroutine observed by every other alias. Stopping an already stopped or
+/// completed handle is harmless.
 pub fn stop_coroutine<T: 'static + Any>(coroutine: Coroutine<T>) {
     let context = &mut get_context().coroutines_context;
 

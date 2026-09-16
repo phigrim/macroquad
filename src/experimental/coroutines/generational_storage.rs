@@ -47,11 +47,7 @@ impl<T> GenerationalStorage<T> {
     }
 
     pub fn get(&self, id: GenerationalId) -> Option<&T> {
-        if id.id > self.vec.len() {
-            return None;
-        }
-
-        let cell = self.vec[id.id].as_ref()?;
+        let cell = self.vec.get(id.id)?.as_ref()?;
         if cell.generation != id.generation {
             return None;
         }
@@ -60,11 +56,7 @@ impl<T> GenerationalStorage<T> {
     }
 
     pub fn get_mut(&mut self, id: GenerationalId) -> Option<&mut T> {
-        if id.id > self.vec.len() {
-            return None;
-        }
-
-        let cell = self.vec[id.id].as_mut()?;
+        let cell = self.vec.get_mut(id.id)?.as_mut()?;
         if cell.generation != id.generation {
             return None;
         }
@@ -104,13 +96,14 @@ impl<T> GenerationalStorage<T> {
     }
 
     pub fn free(&mut self, id: GenerationalId) {
-        // an attempt to free a cell by an outdated ID
-        // this is a legit request, no need to panic or anything, just
-        // dont ruin the data that lives there now
-        if let Some(cell) = &self.vec[id.id] {
-            if cell.generation != id.generation {
-                return;
-            }
+        // Freeing an old or already-freed handle is a no-op. In particular,
+        // Coroutine handles are Copy, so cancellation can legitimately reach
+        // the same ID more than once through different aliases.
+        let Some(cell) = self.vec.get(id.id).and_then(Option::as_ref) else {
+            return;
+        };
+        if cell.generation != id.generation {
+            return;
         }
 
         self.free_indices.push((id.id, id.generation));

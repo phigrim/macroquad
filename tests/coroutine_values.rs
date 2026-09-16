@@ -1,4 +1,8 @@
-use macroquad::{experimental::coroutines::start_coroutine, telemetry, window::next_frame};
+use macroquad::{
+    experimental::coroutines::{start_coroutine, stop_coroutine},
+    telemetry,
+    window::next_frame,
+};
 
 #[macroquad::test]
 async fn coroutine_value() {
@@ -33,4 +37,19 @@ async fn coroutine_memory() {
     next_frame().await;
 
     assert_eq!(telemetry::active_coroutines_count(), 0);
+}
+
+#[macroquad::test]
+async fn stopping_cloned_coroutine_handles_is_idempotent() {
+    let task = start_coroutine(async { String::from("result") });
+    let alias = task.clone();
+
+    stop_coroutine(task);
+    stop_coroutine(alias);
+
+    // The second stop must not leave a duplicate free-list entry behind.
+    let first = start_coroutine(async {});
+    let second = start_coroutine(async {});
+    stop_coroutine(first);
+    stop_coroutine(second);
 }
