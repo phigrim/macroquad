@@ -123,6 +123,77 @@ impl<T> Clone for Coroutine<T> {
 
 impl<T> Copy for Coroutine<T> {}
 
+/// A group of coroutines that are cancelled when the scope is dropped.
+///
+/// The scope stores lightweight generational handles rather than the futures
+/// themselves. A coroutine returned by [`spawn`](Self::spawn) can still be
+/// copied and used by the caller, but dropping the scope invalidates every
+/// handle that it has spawned.
+///
+/// Completed coroutines that still have an unretrieved value remain tracked so
+/// that the value can be retrieved normally. They are removed from the scope
+/// after retrieval, or when a later call to [`spawn`](Self::spawn) prunes stale
+/// handles.
+#[must_use = "dropping a CoroutineScope cancels its coroutines"]
+#[derive(Default)]
+pub struct CoroutineScope {
+    tasks: Vec<GenerationalId>,
+}
+
+impl CoroutineScope {
+    /// Creates an empty coroutine scope.
+    pub const fn new() -> Self {
+        Self { tasks: Vec::new() }
+    }
+
+    /// Starts a coroutine and associates it with this scope.
+    ///
+    /// The returned handle has the same type and semantics as a handle from
+    /// [`start_coroutine`]. Dropping the scope, or calling [`cancel`](Self::cancel),
+    /// stops the coroutine even if the returned handle was copied elsewhere.
+    pub fn spawn<T: 'static + Any>(
+        &mut self,
+        future: impl Future<Output = T> + 'static,
+    ) -> Coroutine<T> {
+        self.prune_stale_handles();
+
+        let coroutine = start_coroutine(future);
+        self.tasks.push(coroutine.id);
+        coroutine
+    }
+
+    /// Stops every coroutine still tracked by this scope and clears the scope.
+    ///
+    /// This operation is idempotent. Calling it explicitly is equivalent to
+    /// dropping the scope at that point; the scope can be reused afterwards.
+    pub fn cancel(&mut self) {
+        if self.tasks.is_empty() {
+            return;
+        }
+
+        let context = &mut get_context().coroutines_context;
+        for id in self.tasks.drain(..) {
+            context.coroutines.free(id);
+        }
+    }
+
+    fn prune_stale_handles(&mut self) {
+        if self.tasks.is_empty() {
+            return;
+        }
+
+        let context = &get_context().coroutines_context;
+        self.tasks
+            .retain(|id| context.coroutines.get(*id).is_some());
+    }
+}
+
+impl Drop for CoroutineScope {
+    fn drop(&mut self) {
+        self.cancel();
+    }
+}
+
 impl<T: 'static + Any> Coroutine<T> {
     /// Returns true if the coroutine finished or was stopped.
     pub fn is_done(&self) -> bool {
