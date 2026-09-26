@@ -92,16 +92,28 @@ impl Font {
         self.characters = characters;
     }
 
+    /// Convert Macroquad's historical fontdue size (pixels per em square) to
+    /// ab_glyph's `PxScale`, which is measured relative to ascent minus descent.
+    /// Keeping this conversion here preserves existing `font_size` behavior for
+    /// fonts whose typographic height differs from their em square.
+    fn px_scale(&self, fontdue_size: f32) -> PxScale {
+        let units_per_em = self
+            .font
+            .units_per_em()
+            .expect("parsed font must have units per em");
+        PxScale::from(fontdue_size * self.font.height_unscaled() / units_per_em)
+    }
+
     pub(crate) fn ascent(&self, font_size: f32) -> f32 {
-        self.font.as_scaled(PxScale::from(font_size)).ascent()
+        self.font.as_scaled(self.px_scale(font_size)).ascent()
     }
 
     pub(crate) fn descent(&self, font_size: f32) -> f32 {
-        self.font.as_scaled(PxScale::from(font_size)).descent()
+        self.font.as_scaled(self.px_scale(font_size)).descent()
     }
 
     pub(crate) fn line_height(&self, font_size: f32) -> f32 {
-        let scaled = self.font.as_scaled(PxScale::from(font_size));
+        let scaled = self.font.as_scaled(self.px_scale(font_size));
         scaled.height() + scaled.line_gap()
     }
 
@@ -111,7 +123,7 @@ impl Font {
         }
 
         let sprite = self.atlas.lock().unwrap().new_unique_id();
-        let scaled = self.font.as_scaled(PxScale::from(size as f32));
+        let scaled = self.font.as_scaled(self.px_scale(size as f32));
         let glyph_id = scaled.glyph_id(character);
         let advance = scaled.h_advance(glyph_id);
 
@@ -399,7 +411,7 @@ pub fn draw_text_ex(text: impl AsRef<str>, x: f32, y: f32, params: TextParams) -
             font.cache_glyph(character, font_size);
         }
 
-        let scaled_font = font.font.as_scaled(PxScale::from(font_size_f32));
+        let scaled_font = font.font.as_scaled(font.px_scale(font_size_f32));
         let kerning_offset = last_character
             .map(|left| {
                 scaled_font.kern(scaled_font.glyph_id(left), scaled_font.glyph_id(character))
