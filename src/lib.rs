@@ -490,6 +490,9 @@ impl Context {
     }
 
     pub(crate) fn perform_render_passes(&mut self) {
+        if !self.gl.has_pending_draws() {
+            return;
+        }
         let matrix = self.projection_matrix();
 
         self.gl.draw(get_quad_context(), matrix);

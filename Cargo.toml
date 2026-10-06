@@ -19,6 +19,8 @@ default = ["opengl"]
 opengl = ["miniquad/opengl"]
 metal = ["miniquad/metal"]
 wgpu = ["miniquad/wgpu"]
+# Emit lightweight WGPU backend phase counters for release profiling builds.
+wgpu-profile = ["wgpu", "miniquad/wgpu-profile"]
 # Opt in to wake-driven polling and cross-thread future wakeups.
 waker = []
 

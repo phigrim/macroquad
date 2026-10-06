@@ -45,12 +45,18 @@ fn scale_to_framebuffer(value: i32, dpi_scale: f32) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::scale_to_framebuffer;
+    use super::{has_pending_draws, scale_to_framebuffer};
 
     #[test]
     fn scales_logical_coordinates_to_retina_pixels() {
         assert_eq!(scale_to_framebuffer(800, 2.0), 1600);
         assert_eq!(scale_to_framebuffer(801, 1.5), 1202);
+    }
+
+    #[test]
+    fn empty_batch_does_not_require_a_render_pass() {
+        assert!(!has_pending_draws(0));
+        assert!(has_pending_draws(1));
     }
 }
 
@@ -732,6 +738,16 @@ impl QuadGl {
         self.draw_calls_count = 0;
     }
 
+    /// Returns whether the batcher has work that must be handed to miniquad.
+    ///
+    /// Camera changes still have to flush before changing render state, but an
+    /// empty batch does not need to enter `QuadGl::draw` at all. This is kept
+    /// crate-visible so the camera module can avoid the otherwise measurable
+    /// empty WGPU submission path.
+    pub(crate) const fn has_pending_draws(&self) -> bool {
+        has_pending_draws(self.draw_calls_count)
+    }
+
     /// Reset internal state to known default
     pub fn reset(&mut self) {
         self.state.clip = None;
@@ -1159,6 +1175,10 @@ impl QuadGl {
             };
         }
     }
+}
+
+const fn has_pending_draws(draw_calls_count: usize) -> bool {
+    draw_calls_count != 0
 }
 
 mod shader {

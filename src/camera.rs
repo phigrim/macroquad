@@ -286,7 +286,9 @@ pub fn set_camera(camera: &dyn Camera) {
     let context = get_context();
 
     // flush previous camera draw calls
-    context.perform_render_passes();
+    if context.gl.has_pending_draws() {
+        context.perform_render_passes();
+    }
 
     context
         .gl
@@ -301,8 +303,24 @@ pub fn set_camera(camera: &dyn Camera) {
 pub fn set_default_camera() {
     let context = get_context();
 
+    // Avoid touching the backend when the caller is already on the default
+    // screen camera and there is no queued geometry. This is common for the
+    // cached gameplay background path.
+    if context.camera_matrix.is_none()
+        && context.gl.get_active_render_pass().is_none()
+        && !context.gl.is_depth_test_enabled()
+        && !context.gl.has_pending_draws()
+    {
+        // `CameraState` historically does not include the viewport, so clear
+        // a stale viewport even when the backend transition itself is a no-op.
+        context.gl.viewport(None);
+        return;
+    }
+
     // flush previous camera draw calls
-    context.perform_render_passes();
+    if context.gl.has_pending_draws() {
+        context.perform_render_passes();
+    }
 
     context.gl.render_pass(None);
     context.gl.viewport(None);
@@ -331,7 +349,9 @@ pub fn pop_camera_state() {
     let context = get_context();
 
     if let Some(camera_state) = context.camera_stack.pop() {
-        context.perform_render_passes();
+        if context.gl.has_pending_draws() {
+            context.perform_render_passes();
+        }
 
         context.gl.render_pass(camera_state.render_pass);
         context.gl.depth_test(camera_state.depth_test);
